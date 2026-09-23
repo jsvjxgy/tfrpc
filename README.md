@@ -20,11 +20,26 @@ The resulting binary is ~150 KB.
 | Wire protocol | **v1 and v2** (`transport.wireProtocol`) |
 | Transports | plain TCP, **KCP over UDP**, **yamux** multiplexing (`transport.tcpMux`) |
 | Encryption | per-proxy AES-128-CFB; v2 control channel AEAD (AES-256-GCM / XChaCha20-Poly1305); PBKDF2-HMAC-SHA1 and HKDF-SHA256 key derivation |
-| AES acceleration | runtime CPU dispatch: x86 AES-NI, otherwise an optimized T-table software AES |
+| AES acceleration | runtime CPU dispatch: x86 AES-NI, otherwise a 256-byte S-box software AES |
 | Compression | per-proxy **snappy** (`useCompression`), byte-compatible with `golang/snappy` |
 | TLS | **TLS 1.3 and TLS 1.2**, self-contained: X25519/ECDHE key agreement, HKDF-SHA256 / TLS PRF, AES-128-GCM records |
 | Certificates | **RSA and ECDSA (P-256)**; multi-level chain verification; DNS SAN host matching; **mTLS** client certificates |
 | Config format | TOML (subset) |
+
+## Platform support
+
+tfrpc targets **Linux** only. It relies on two Linux-specific interfaces:
+
+- `/dev/urandom` for random bytes
+- `SOCK_CLOEXEC` for socket creation
+
+Supported architectures: **x86_64, aarch64, armv7/armv6, mips/mipsel,
+riscv64, i386**. It builds against musl or glibc, and static linking is
+supported (recommended for routers).
+
+macOS, Windows and the BSDs are **not** supported; porting would require
+replacing the two interfaces above (e.g. `getrandom()`/`arc4random()` and
+socket-flag handling).
 
 ## Quick start
 
@@ -190,7 +205,7 @@ instead of `remotePort`.
 - Per-proxy data: **AES-128-CFB**, key = PBKDF2-HMAC-SHA1(token, "frp", 64).
 - v2 control channel: AEAD keyed from the handshake transcript.
 - AES auto-adapts: x86 **AES-NI** when available, otherwise an optimized
-  **T-table** software implementation (also used on MIPS).
+  **S-box** software implementation (also used on MIPS).
 - Order of operations matches frp: **compress, then encrypt** on write;
   decrypt, then decompress on read.
 
@@ -324,6 +339,9 @@ src/
 ```
 
 ## License
+
+tfrpc is released under the **GNU General Public License v3.0** — see
+[LICENSE](LICENSE).
 
 The frp protocol and its constants are from
 [frp](https://github.com/fatedier/frp) (Apache-2.0). This implementation is an

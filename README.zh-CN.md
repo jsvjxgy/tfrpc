@@ -19,11 +19,24 @@
 | 线协议 | **v1 和 v2**（`transport.wireProtocol`） |
 | 传输方式 | 纯 TCP、**KCP over UDP**、**yamux 多路复用**（`transport.tcpMux`） |
 | 加密 | 每代理 AES-128-CFB；v2 控制信道 AEAD（AES-256-GCM / XChaCha20-Poly1305）；PBKDF2-HMAC-SHA1 与 HKDF-SHA256 密钥派生 |
-| AES 加速 | 运行时自动适配：x86 用 AES-NI，否则用优化的查表（T-table）软件 AES |
+| AES 加速 | 运行时自动适配：x86 用 AES-NI，否则用 256 字节 S-box 软件 AES |
 | 压缩 | 每代理 **snappy**（`useCompression`），与 `golang/snappy` 字节兼容 |
 | TLS | **TLS 1.3 与 TLS 1.2**，完全自包含：X25519/ECDHE 密钥协商、HKDF-SHA256 / TLS PRF、AES-128-GCM 记录层 |
 | 证书 | **RSA 与 ECDSA (P-256)**；多级证书链验证；DNS SAN 主机名校验；**mTLS** 客户端证书 |
 | 配置格式 | TOML（子集） |
+
+## 平台支持
+
+tfrpc 仅支持 **Linux**，依赖两个 Linux 特有的接口：
+
+- `/dev/urandom`：随机数
+- `SOCK_CLOEXEC`：创建 socket
+
+支持的架构：**x86_64、aarch64、armv7/armv6、mips/mipsel、riscv64、i386**。
+可针对 musl 或 glibc 构建，支持静态链接（路由器场景推荐）。
+
+**不支持** macOS、Windows 与 BSD；移植需要替换上述两个接口
+（例如改用 `getrandom()`/`arc4random()` 与 socket 标志处理）。
 
 ## 快速开始
 
@@ -299,17 +312,9 @@ src/
   log.c       日志
 ```
 
-## 许可
+## 许可证
+
+tfrpc 以 **GNU 通用公共许可证第 3 版**发布，详见 [LICENSE](LICENSE)。
 
 frp 协议及其常量来自 [frp](https://github.com/fatedier/frp)
 （Apache-2.0）。本实现是客户端侧的独立重写。
-
-## 许可证
-
-Copyright (C) 2026 the tfrpc authors.
-
-本程序是自由软件：你可以根据自由软件基金会发布的 GNU 通用公共许可证
-（第 3 版或任何更新版本）的条款重新发布和/或修改它。
-
-本程序按"原样"分发，不提供任何担保，包括但不限于对适销性或特定用途
-适用性的默示担保。详见 [LICENSE](LICENSE) 文件。
