@@ -13,3 +13,11 @@ openwrt-toolchain-*/
 
 # editor/agent state
 .codewhale
+
+# release artifacts and the zig toolchain (local only)
+dist/
+zig-linux-x86_64-*/
+zig-linux-x86_64-*.tar.xz
+
+# local release helper
+build.sh

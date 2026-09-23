@@ -4,9 +4,6 @@
 [`frps`](https://github.com/fatedier/frp) 服务端线协议兼容。**零外部依赖**——
 所有加密、压缩、TLS 均为项目内自实现。
 
-为 MIPS 路由器（MT7621/OpenWrt）而写：Go 版 frpc 有 13–20 MB，本实现编译后
-约 150 KB。
-
 [English](README.md)
 
 ## 功能特性
@@ -32,7 +29,8 @@ tfrpc 仅支持 **Linux**，依赖两个 Linux 特有的接口：
 - `/dev/urandom`：随机数
 - `SOCK_CLOEXEC`：创建 socket
 
-支持的架构：**x86_64、aarch64、armv7/armv6、mips/mipsel、riscv64、i386**。
+支持的架构：**amd64（x86_64）、arm64（aarch64）、arm（armv6 软浮点）、
+arm_hf（armv7 硬浮点）、mips、mipsle、mips64、mips64le、riscv64、386**。
 可针对 musl 或 glibc 构建，支持静态链接（路由器场景推荐）。
 
 **不支持** macOS、Windows 与 BSD；移植需要替换上述两个接口

@@ -5,9 +5,6 @@ wire-compatible with the official Go [`frps`](https://github.com/fatedier/frp)
 server. No external dependencies — all cryptography, compression and TLS are
 implemented in-tree.
 
-It was written for MIPS routers (MT7621/OpenWrt) where a Go frpc is 13–20 MB.
-The resulting binary is ~150 KB.
-
 [中文文档](README.zh-CN.md)
 
 ## Features
@@ -33,9 +30,10 @@ tfrpc targets **Linux** only. It relies on two Linux-specific interfaces:
 - `/dev/urandom` for random bytes
 - `SOCK_CLOEXEC` for socket creation
 
-Supported architectures: **x86_64, aarch64, armv7/armv6, mips/mipsel,
-riscv64, i386**. It builds against musl or glibc, and static linking is
-supported (recommended for routers).
+Supported architectures: **amd64 (x86_64), arm64 (aarch64),
+arm (armv6 softfloat), arm_hf (armv7 hardfloat), mips, mipsle, mips64,
+mips64le, riscv64, 386**. It builds against musl or glibc, and static
+linking is supported (recommended for routers).
 
 macOS, Windows and the BSDs are **not** supported; porting would require
 replacing the two interfaces above (e.g. `getrandom()`/`arc4random()` and
