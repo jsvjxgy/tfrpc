@@ -1,0 +1,15 @@
+# build outputs
+*.o
+tfrpc
+
+# test binaries and fuzzing artifacts
+test/unit_tests
+test/fuzz/*_fuzzer
+*.profraw
+*.profdata
+
+# local cross-compilation toolchain (large, not part of the source)
+openwrt-toolchain-*/
+
+# editor/agent state
+.codewhale
