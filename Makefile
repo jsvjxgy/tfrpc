@@ -5,9 +5,9 @@ LDFLAGS ?= -pthread
 
 SRCS := src/main.c src/control.c src/workconn.c src/config.c \
         src/proto.c src/json.c src/crypto.c src/base64.c src/net.c src/log.c \
-        src/tconn.c src/yamux.c src/v2.c src/kcp.c src/kcpconn.c src/snappy.c src/tls.c src/x25519.c src/bignum.c src/x509.c src/ecdsa.c
+        src/tconn.c src/yamux.c src/v2.c src/kcp.c src/kcpconn.c src/snappy.c src/tls.c src/quic.c src/x25519.c src/bignum.c src/x509.c src/ecdsa.c
 OBJS := $(SRCS:.c=.o)
-HDRS := include/tfrpc.h include/kcp.h include/snappy.h include/tls.h include/x25519.h include/bignum.h include/x509.h include/ecdsa.h
+HDRS := include/tfrpc.h include/kcp.h include/snappy.h include/tls.h include/quic.h include/x25519.h include/bignum.h include/x509.h include/ecdsa.h
 
 TARGET := tfrpc
 
@@ -35,10 +35,20 @@ clean:
 TEST_SRCS := src/crypto.c src/x25519.c src/ecdsa.c src/bignum.c src/snappy.c \
              src/x509.c src/json.c src/base64.c src/log.c src/net.c src/config.c \
              src/v2.c src/tconn.c src/proto.c src/tls.c src/kcp.c src/kcpconn.c \
-             src/yamux.c src/control.c src/workconn.c
+             src/yamux.c src/quic.c src/control.c src/workconn.c
 
-test: test/unit_tests.c $(TEST_SRCS) $(HDRS)
-	$(CC) $(CFLAGS) -Iinclude -fsanitize=address,undefined -o test/unit_tests test/unit_tests.c $(TEST_SRCS) -pthread
+QUIC_TEST_SRCS := src/crypto.c src/x25519.c src/x509.c src/ecdsa.c \
+                  src/bignum.c src/base64.c src/net.c src/log.c
+
+test: test/unit_tests test/quic_unit
 	test/unit_tests
+	test/quic_unit
+
+test/unit_tests: test/unit_tests.c $(TEST_SRCS) $(HDRS)
+	$(CC) $(CFLAGS) -Iinclude -fsanitize=address,undefined -o test/unit_tests test/unit_tests.c $(TEST_SRCS) -pthread
+
+# white-box tests include src/quic.c directly (no quic.o on the link line)
+test/quic_unit: test/quic_unit.c $(QUIC_TEST_SRCS) $(HDRS)
+	$(CC) $(CFLAGS) -Iinclude -fsanitize=address,undefined -o test/quic_unit test/quic_unit.c $(QUIC_TEST_SRCS) -pthread
 
 .PHONY: test

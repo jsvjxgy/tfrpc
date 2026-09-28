@@ -507,6 +507,14 @@ void aes_cfb_free(void *ctxp) {
     }
 }
 
+/* public single-block AES-128 encrypt (used by QUIC header protection) */
+void aes_block_encrypt(const uint8_t key[16], const uint8_t in[16], uint8_t out[16]) {
+    aes_ctx_t c;
+    aes_expand_key(&c, key, 16);
+    aes_encrypt_block(&c, (uint8_t *)in, out);
+    secure_zero(&c, sizeof(c));
+}
+
 void *aes_cfb_new(const uint8_t *key, int key_len, const uint8_t *iv, int encrypt) {
     aes_cfb_ctx *ctx = calloc(1, sizeof(*ctx));
     if (!ctx)

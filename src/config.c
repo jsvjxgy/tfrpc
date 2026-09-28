@@ -165,8 +165,11 @@ static int parse_toml(const char *path) {
                 g_cfg.tcp_mux = strcmp(val, "true") == 0;
             else if (strcmp(sub, "wireProtocol") == 0)
                 g_cfg.wire_v2 = strcmp(trim_quotes(val), "v2") == 0;
-            else if (strcmp(sub, "protocol") == 0)
-                g_cfg.protocol_kcp = strcmp(trim_quotes(val), "kcp") == 0;
+            else if (strcmp(sub, "protocol") == 0) {
+                const char *pv = trim_quotes(val);   /* careful: trims in place */
+                g_cfg.protocol_kcp = strcmp(pv, "kcp") == 0;
+                g_cfg.protocol_quic = strcmp(pv, "quic") == 0;
+            }
             else if (strcmp(sub, "poolCount") == 0)
                 g_cfg.pool_count = atoi(val);
             else if (strcmp(sub, "tls.enable") == 0)

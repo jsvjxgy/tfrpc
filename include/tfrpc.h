@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define TFRPC_VERSION "0.1.0"
+#define TFRPC_VERSION "1.1.0"
 
 #define MAX_PROXIES 64
 #define MAX_NAME_LEN 128
@@ -48,6 +48,7 @@ typedef struct {
     bool tcp_mux;
     int wire_v2;   /* 1 = wire protocol v2, 0 = v1 */
     int protocol_kcp; /* 1 = transport.protocol = "kcp" */
+    int protocol_quic; /* 1 = transport.protocol = "quic" */
     bool tls_enable;              /* transport.tls.enable */
     bool tls_disable_first_byte;  /* transport.tls.disableCustomTLSFirstByte */
     char tls_server_name[128];    /* transport.tls.serverName (default serverAddr) */
@@ -93,6 +94,7 @@ typedef struct tconn {
     void *sess; /* yamux session (kind 1) */
     void *st;   /* yamux stream (kind 1) */
     void *kconn; /* kcp session (kind 2) */
+    void *qstream; /* quic stream (kind 4) */
 
     /* v1: AES-128-CFB with lazy IV */
     int crypto;   /* 1 = AES-128-CFB enabled */
@@ -128,6 +130,7 @@ tconn_t *tconn_socket(int fd);
 tconn_t *tconn_stream(void *sess);
 tconn_t *tconn_kcp(void *kconn);
 tconn_t *tconn_kcp_tls(void *kconn, void *tls);
+tconn_t *tconn_quic(void *qstream);
 tconn_t *tconn_socket_tls(int fd, void *tls);
 tconn_t *open_frp_conn(tfrpc_config_t *cfg);
 void *tconn_tls_wrap(const tfrpc_config_t *cfg, int fd);
@@ -181,6 +184,7 @@ void secure_zero(void *p, size_t n);
 void *aes_cfb_new(const uint8_t *key, int key_len, const uint8_t *iv, int encrypt);
 extern int tfrpc_aes_force_soft;   /* test hook: force software AES */
 void aes_cfb_stream(void *ctxp, uint8_t *buf, size_t len);
+void aes_block_encrypt(const uint8_t key[16], const uint8_t in[16], uint8_t out[16]);
 void aes_cfb_free(void *ctxp);
 int derive_key(const char *token, uint8_t *out, size_t out_len);
 void sha256_digest(const uint8_t *data, size_t len, uint8_t out[32]);

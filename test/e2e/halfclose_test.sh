@@ -20,12 +20,12 @@ while True:
     c,_=s.accept(); threading.Thread(target=h,args=(c,),daemon=True).start()
 ' >/dev/null 2>&1 & E=$!
 run() {
-  local label=$1 proto=$2 mux=$3
+  local label=$1 proto=$2 mux=$3 port=${4:-7000}
   pkill -9 -x tfrpc 2>/dev/null; pkill -9 -x frps-test 2>/dev/null; sleep 0.5
-  printf 'bindPort = 7000\nkcpBindPort = 7000\ntransport.tcpMux = %s\nauth.method = "token"\nauth.token = "s"\n' "$mux" > /tmp/hc-frps.toml
+  printf 'bindPort = 7000\nkcpBindPort = 7000\nquicBindPort = 7001\ntransport.tcpMux = %s\nauth.method = "token"\nauth.token = "s"\n' "$mux" > /tmp/hc-frps.toml
   /tmp/frps-test -c /tmp/hc-frps.toml >/dev/null 2>&1 & local F=$!
   sleep 1.5
-  printf 'serverAddr = "127.0.0.1"\nserverPort = 7000\ntransport.protocol = "%s"\ntransport.tcpMux = %s\nauth.token = "s"\n[[proxies]]\nname = "hc"\ntype = "tcp"\nlocalPort = 2222\nremotePort = 6229\n' "$proto" "$mux" > /tmp/hc-c.toml
+  printf 'serverAddr = "127.0.0.1"\nserverPort = %s\ntransport.protocol = "%s"\ntransport.tcpMux = %s\nauth.token = "s"\n[[proxies]]\nname = "hc"\ntype = "tcp"\nlocalPort = 2222\nremotePort = 6229\n' "$port" "$proto" "$mux" > /tmp/hc-c.toml
   $TFRPC -c /tmp/hc-c.toml >/tmp/hc-c.log 2>&1 & local C=$!
   for i in $(seq 1 40); do grep -aq "ready" /tmp/hc-c.log 2>/dev/null && break; sleep 0.5; done
   local r=$(timeout 40 python3 -c "
@@ -51,5 +51,6 @@ run "tcp  mux=false" tcp false
 run "tcp  mux=true " tcp true
 run "kcp  mux=false" kcp false
 run "kcp  mux=true " kcp true
+run "quic         " quic false 7001
 kill -9 $E 2>/dev/null; pkill -9 -x tfrpc 2>/dev/null
 echo DONE >> $RES

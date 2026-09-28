@@ -21,3 +21,8 @@ zig-linux-x86_64-*.tar.xz
 
 # local release helper
 build.sh
+*.gcda
+*.gcno
+*.gcov
+*.plist
+test/quic_unit

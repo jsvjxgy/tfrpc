@@ -1239,3 +1239,28 @@ int tls_write(tls_conn_t *t, const void *buf, size_t len) {
     }
     return 0;
 }
+
+/* load the first certificate from a PEM bundle; the parsed certificate
+ * keeps pointers into der_buf, so the caller must keep it alive */
+int tls_load_ca(const char *path, x509_cert_t *out,
+                uint8_t *der_buf, size_t der_buf_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        log_msg(LOG_WARN, "cannot open trustedCaFile %s", path);
+        return -1;
+    }
+    char pem[16384];
+    size_t n = fread(pem, 1, sizeof(pem) - 1, f);
+    fclose(f);
+    pem[n] = '\0';
+    size_t dlen = 0;
+    if (x509_pem_first_cert(pem, n, der_buf, der_buf_len, &dlen) < 0) {
+        log_msg(LOG_WARN, "no certificate in trustedCaFile %s", path);
+        return -1;
+    }
+    if (x509_parse(der_buf, dlen, out) < 0) {
+        log_msg(LOG_WARN, "cannot parse trusted CA certificate");
+        return -1;
+    }
+    return 0;
+}

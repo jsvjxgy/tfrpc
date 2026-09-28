@@ -24,6 +24,7 @@
 
 #include "tfrpc.h"
 #include "kcp.h"
+#include "quic.h"
 
 
 #define UDP_PEER_IDLE_MS  30000
@@ -114,6 +115,8 @@ static void *relay_forward(void *arg) {
                 shutdown(dst->fd, SHUT_WR);
             else if (dst->kind == 2)
                 kcp_abort(dst->kconn);
+            else if (dst->kind == 4)
+                quic_stream_close(dst->qstream);
             return NULL;
         }
         if (tconn_write_full(dst, buf, (size_t)n) < 0) {

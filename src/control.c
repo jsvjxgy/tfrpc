@@ -19,11 +19,13 @@
 
 #include "tfrpc.h"
 #include "kcp.h"
+#include "quic.h"
 #include "tls.h"
 
 #define T_LOGIN_RESP      '1'
 
 void *g_session = NULL;      /* yamux session, or NULL when tcpMux off */
+void *g_quic = NULL;        /* QUIC session, or NULL when protocol != quic */
 _Atomic int g_login_rejected = 0;   /* set when the server rejects the login */
 extern _Atomic int g_running;      /* global stop flag */
 
@@ -129,11 +131,13 @@ static void *workconn_thread(void *arg) {
     return NULL;
 }
 
-/* wait until every detached work-conn thread has exited (bounded) */
+/* wait until every detached work-conn thread has exited.  Bounded by slightly
+ * more than the local-connect timeout (10 s) so a thread that is dialing the
+ * local service can never outlive this call and then touch a freed session. */
 static void workconn_wait_all(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += 5;
+    ts.tv_sec += 12;
     pthread_mutex_lock(&g_wc_lock);
     while (g_wc_active > 0)
         if (pthread_cond_timedwait(&g_wc_cond, &g_wc_lock, &ts) != 0)
@@ -144,6 +148,14 @@ static void workconn_wait_all(void) {
 /* open a connection to frps: a yamux stream if mux is on, else a new
  * TCP or KCP connection depending on transport.protocol. */
 tconn_t *open_frp_conn(tfrpc_config_t *cfg) {
+    if (cfg->protocol_quic) {
+        if (!g_quic)
+            return NULL;
+        quic_stream_t *s = quic_open_stream((quic_conn_t *)g_quic);
+        if (!s)
+            return NULL;
+        return tconn_quic(s);
+    }
     if (cfg->tcp_mux) {
         if (g_session)
             return tconn_stream(g_session);
@@ -250,8 +262,10 @@ static void run_session(tfrpc_config_t *cfg) {
     kcpconn_t *kconn = NULL;
     int64_t last_ping, last_pong;
     int raw_fd = -1;
+    x509_cert_t quic_ca;   /* trusted CA for the QUIC handshake (if configured) */
+    uint8_t quic_ca_der[8192];  /* DER bytes the parsed cert points into */
 
-    if (cfg->tcp_mux) {
+    if (cfg->tcp_mux && !cfg->protocol_quic) {
         if (cfg->protocol_kcp) {
             kconn = kcp_dial(cfg->server_addr, (uint16_t)cfg->server_port, 10000);
             if (!kconn) {
@@ -320,15 +334,38 @@ static void run_session(tfrpc_config_t *cfg) {
         log_msg(LOG_INFO, "connected to %s:%d (tcpMux%s)", cfg->server_addr,
                 cfg->server_port, cfg->protocol_kcp ? ", kcp" : "");
     } else {
+        if (cfg->protocol_quic && !g_quic) {
+            const char *sn = cfg->tls_server_name[0] ? cfg->tls_server_name : cfg->server_addr;
+            const x509_cert_t *ca = NULL;
+            if (cfg->tls_trusted_ca[0]) {
+                if (tls_load_ca(cfg->tls_trusted_ca, &quic_ca,
+                                quic_ca_der, sizeof(quic_ca_der)) < 0)
+                    return;
+                ca = &quic_ca;
+            }
+            if (cfg->tls_cert_file[0])
+                log_msg(LOG_WARN, "client certificates are not supported over QUIC; "
+                                  "mTLS will fail if frps requires them");
+            g_quic = quic_dial(cfg->server_addr, (uint16_t)cfg->server_port, sn, ca, 10000);
+            if (!g_quic) {
+                log_msg(LOG_WARN, "quic dial to %s:%d failed", cfg->server_addr, cfg->server_port);
+                return;
+            }
+        }
         ctl = open_frp_conn(cfg);
         if (!ctl) {
             log_msg(LOG_WARN, "connect to %s:%d failed", cfg->server_addr, cfg->server_port);
+            if (cfg->protocol_quic && g_quic) {
+                quic_conn_close((quic_conn_t *)g_quic);
+                g_quic = NULL;
+            }
             return;
         }
         if (cfg->protocol_kcp)
             kconn = ctl->kconn;
         log_msg(LOG_INFO, "connected to %s:%d%s", cfg->server_addr,
-                cfg->server_port, cfg->protocol_kcp ? " (kcp)" : "");
+                cfg->server_port,
+                cfg->protocol_kcp ? " (kcp)" : (cfg->protocol_quic ? " (quic)" : ""));
     }
 
     /* a KCP "connect" is instant (UDP); a silent peer must not block the
@@ -458,6 +495,13 @@ teardown:
         workconn_wait_all();
         yamux_close(g_session);
         g_session = NULL;
+    }
+    if (cfg->protocol_quic && g_quic) {
+        /* wake relay threads blocked on streams, then release the session */
+        quic_conn_shutdown((quic_conn_t *)g_quic);
+        workconn_wait_all();
+        quic_conn_close((quic_conn_t *)g_quic);
+        g_quic = NULL;
     }
 }
 

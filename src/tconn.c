@@ -15,6 +15,7 @@
 
 #include "tfrpc.h"
 #include "kcp.h"
+#include "quic.h"
 #include "snappy.h"
 #include "tls.h"
 #include "x509.h"
@@ -74,27 +75,11 @@ static void *tls_wrap_common(const tfrpc_config_t *cfg, int fd, void *kconn) {
     const char *sn = cfg->tls_server_name[0] ? cfg->tls_server_name : cfg->server_addr;
 
     x509_cert_t ca;
+    uint8_t ca_der[8192];
     const x509_cert_t *ca_p = NULL;
     if (cfg->tls_trusted_ca[0]) {
-        FILE *f = fopen(cfg->tls_trusted_ca, "rb");
-        if (!f) {
-            log_msg(LOG_WARN, "cannot open trustedCaFile %s", cfg->tls_trusted_ca);
+        if (tls_load_ca(cfg->tls_trusted_ca, &ca, ca_der, sizeof(ca_der)) < 0)
             return NULL;
-        }
-        char pem[16384];
-        size_t n = fread(pem, 1, sizeof(pem) - 1, f);
-        fclose(f);
-        pem[n] = '\0';
-        uint8_t der[8192];
-        size_t dlen = 0;
-        if (x509_pem_first_cert(pem, n, der, sizeof(der), &dlen) < 0) {
-            log_msg(LOG_WARN, "no certificate in trustedCaFile %s", cfg->tls_trusted_ca);
-            return NULL;
-        }
-        if (x509_parse(der, dlen, &ca) < 0) {
-            log_msg(LOG_WARN, "cannot parse trusted CA certificate");
-            return NULL;
-        }
         ca_p = &ca;
     }
 
@@ -173,11 +158,22 @@ tconn_t *tconn_kcp_tls(void *kconn, void *tls) {
     return c;
 }
 
+tconn_t *tconn_quic(void *qstream) {
+    tconn_t *c = calloc(1, sizeof(*c));
+    if (!c)
+        return NULL;
+    c->kind = 4;
+    c->qstream = qstream;
+    return c;
+}
+
 void tconn_set_deadline(tconn_t *c, int timeout_ms) {
     if (!c)
         return;
     if (c->kind == 2)
         kcp_set_deadline(c->kconn, timeout_ms);
+    else if (c->kind == 4)
+        quic_set_deadline(c->qstream, timeout_ms);
 }
 
 int tconn_enable_crypto(tconn_t *c, const uint8_t key[16]) {
@@ -351,6 +347,11 @@ static int tconn_write_plain(tconn_t *c, const void *buf, size_t n) {
             return -1;
         return kcp_write(c->kconn, buf, (int)n);
     }
+    if (c->kind == 4) {
+        if (n > 0x7fffffff)
+            return -1;
+        return quic_stream_write(c->qstream, buf, (int)n);
+    }
     return yamux_stream_write(c->st, buf, n);
 }
 
@@ -371,6 +372,16 @@ static int tconn_read_plain(tconn_t *c, void *buf, size_t n) {
         size_t done = 0;
         while (done < n) {
             int r = kcp_read(c->kconn, (uint8_t *)buf + done, (int)(n - done));
+            if (r <= 0)
+                return -1;
+            done += (size_t)r;
+        }
+        return 0;
+    }
+    if (c->kind == 4) {
+        size_t done = 0;
+        while (done < n) {
+            int r = quic_stream_read(c->qstream, (uint8_t *)buf + done, (int)(n - done));
             if (r <= 0)
                 return -1;
             done += (size_t)r;
@@ -474,6 +485,8 @@ int tconn_read_some(tconn_t *c, void *buf, size_t n) {
         r = read(c->fd, buf, n);
     else if (c->kind == 2)
         r = kcp_read(c->kconn, buf, (int)n);
+    else if (c->kind == 4)
+        r = quic_stream_read(c->qstream, buf, (int)n);
     else
         r = yamux_stream_read(c->st, buf, n);
     if (r <= 0)
@@ -527,6 +540,8 @@ int tconn_wait_readable(tconn_t *c, int timeout_ms) {
         }
         if (c->kind == 2)
             return kcp_wait_readable(c->kconn, timeout_ms);
+        if (c->kind == 4)
+            return quic_stream_wait_readable(c->qstream, timeout_ms);
         return yamux_stream_wait_readable(c->st, timeout_ms);
     }
     if (c->kind == 0) {
@@ -538,6 +553,8 @@ int tconn_wait_readable(tconn_t *c, int timeout_ms) {
     }
     if (c->kind == 2)
         return kcp_wait_readable(c->kconn, timeout_ms);
+    if (c->kind == 4)
+        return quic_stream_wait_readable(c->qstream, timeout_ms);
     return yamux_stream_wait_readable(c->st, timeout_ms);
 }
 
@@ -604,6 +621,8 @@ void tconn_abort(tconn_t *c) {
         yamux_stream_abort(c->st);
     } else if (c->kind == 2) {
         kcp_abort(c->kconn);
+    } else if (c->kind == 4) {
+        quic_stream_abort(c->qstream);
     } else if (c->fd >= 0) {
         shutdown(c->fd, SHUT_RDWR);   /* plain socket or TLS over TCP */
     }
@@ -635,6 +654,9 @@ void tconn_close(tconn_t *c) {
         close(c->fd);
     } else if (c->kind == 2) {
         kcp_close(c->kconn);
+    } else if (c->kind == 4) {
+        quic_stream_close(c->qstream);   /* send FIN */
+        quic_stream_free(c->qstream);    /* release per-connection buffers */
     } else {
         yamux_stream_close(c->st);
     }

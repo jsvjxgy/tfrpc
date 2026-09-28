@@ -27,6 +27,12 @@ tls_conn_t *tls_connect(int fd, const char *server_name, const x509_cert_t *ca,
                         const uint8_t *client_cert, size_t client_cert_len,
                         const rsa_priv_t *client_key);
 
+/* load the first certificate from a PEM bundle into `out`; `out` points
+ * into `der_buf`, which must stay alive for as long as `out` is used.
+ * Returns 0 on success. */
+int tls_load_ca(const char *path, x509_cert_t *out,
+                uint8_t *der_buf, size_t der_buf_len);
+
 /* Same handshake over a callback-based transport (e.g. a KCP session). */
 tls_conn_t *tls_connect_io(void *io, tls_io_read_fn rd, tls_io_write_fn wr,
                            const char *server_name, const x509_cert_t *ca,

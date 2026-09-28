@@ -1,6 +1,6 @@
 # Coverage-guided fuzzing (libFuzzer)
 
-Four harnesses cover different layers of the TLS client:
+Harnesses cover the TLS client and the QUIC parsers:
 
 | harness | target | measured coverage (tls.c) |
 |---|---|---|
@@ -10,6 +10,7 @@ Four harnesses cover different layers of the TLS client:
 | `fuzz_tls13_hs.c` | full TLS 1.3 handshake incl. encrypted Certificate/CertificateVerify/Finished | 19.5% (50% functions) |
 | `fuzz_x509.c` | DER certificate parse + chain verify + hostname (embedded RSA and ECDSA CAs) | x509.c 62%, ecdsa.c 87% |
 | `fuzz_pem.c` | PEM certificate and private-key loaders (trustedCaFile / certFile / keyFile paths) | x509.c 83% |
+| `fuzz_quic.c` | QUIC white-box: frame parsers, CRYPTO reassembly, structured ServerHello/EncryptedExtensions/Certificate, valid-key Initial/1-RTT receive paths incl. key updates, coalesced datagrams, stream reassembly (`#include quic.c`) | quic.c 1738 edges |
 
 Build (clang with libFuzzer):
 
@@ -23,6 +24,11 @@ clang -fsanitize=fuzzer,address,undefined -O1 -g -std=c11 -Iinclude -o tls_fuzze
 clang -fsanitize=fuzzer,address,undefined -O1 -g -std=c11 -Iinclude -o tls13hs_fuzzer \
     test/fuzz/fuzz_tls13_hs.c src/crypto.c src/log.c src/net.c src/x25519.c \
     src/x509.c src/ecdsa.c src/bignum.c src/base64.c -pthread
+
+# QUIC parsers (includes quic.c for internals)
+clang -fsanitize=fuzzer,address,undefined -O1 -g -Iinclude -o quic_fuzzer \
+    test/fuzz/fuzz_quic.c src/crypto.c src/x25519.c src/x509.c src/ecdsa.c \
+    src/bignum.c src/base64.c src/net.c src/log.c -pthread
 # (fuzz_tls_rec.c / fuzz_tls_inner.c use the same dependency list)
 ```
 

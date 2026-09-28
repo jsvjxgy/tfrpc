@@ -14,7 +14,7 @@
 | 多用户 | `user` 属性（服务端按用户命名空间隔离） |
 | 认证 | `token` —— md5(token+时间戳)，与 frp 字节兼容 |
 | 线协议 | **v1 和 v2**（`transport.wireProtocol`） |
-| 传输方式 | 纯 TCP、**KCP over UDP**、**yamux 多路复用**（`transport.tcpMux`） |
+| 传输方式 | 纯 TCP、**KCP over UDP**、**QUIC**、**yamux 多路复用**（`transport.tcpMux`） |
 | 加密 | 每代理 AES-128-CFB；v2 控制信道 AEAD（AES-256-GCM / XChaCha20-Poly1305）；PBKDF2-HMAC-SHA1 与 HKDF-SHA256 密钥派生 |
 | AES 加速 | 运行时自动适配：x86 用 AES-NI，否则用 256 字节 S-box 软件 AES |
 | 压缩 | 每代理 **snappy**（`useCompression`），与 `golang/snappy` 字节兼容 |
@@ -137,7 +137,7 @@ token = "secret123"                  # 必须与 frps 的 auth.token 一致
 
 ```toml
 transport.wireProtocol = "v2"        # "v1"（默认）或 "v2"
-transport.protocol = "kcp"           # "tcp"（默认）或 "kcp"；需 frps 开 kcpBindPort
+transport.protocol = "kcp"           # "tcp"（默认）、"kcp" 或 "quic"；需 frps 开对应端口
 transport.tcpMux = false             # 必须与 frps 一致（默认 true）
 transport.poolCount = 20             # 提高 frps 的 work 连接池（poolCount + 10）
 ```
@@ -226,6 +226,22 @@ kcp-go v5.6.13 线格式，FEC 组帧（10/3，与 frp 相同）。数据包为
 `kcpBindPort`（0 表示禁用），且 `transport.tcpMux` 必须与服务端一致（非 mux KCP
 时 frps 需设 `tcpMux = false`）。
 
+### QUIC
+
+QUIC v1（RFC 9000/9001）完全自包含实现——包保护（AES-128-GCM 与 AES 头保护）、
+基于 TLS 1.3 的 QUIC-TLS（X25519、`quic_transport_parameters`）、流控、丢包恢复
+与密钥更新。一个 QUIC 会话以独立双向流承载所有连接，因此 `transport.tcpMux`
+被忽略（与 frp 一致）。需要 frps 配置 `quicBindPort`。KCP 与 QUIC 都使用 UDP，
+端口必须不同（`kcpBindPort != quicBindPort`），或将 KCP 禁用（`kcpBindPort = 0`）。
+客户端空闲 10 秒发送 PING，30 秒无有效包则关闭会话，与 frps 的 QUIC 默认值
+（`keepalivePeriod = 10`、`maxIdleTimeout = 30`）一致。`transport.tls.trustedCaFile`
+对 QUIC 握手同样生效（证书链 + 主机名校验）；但 QUIC **不支持客户端证书**
+（`certFile`/`keyFile`），若 frps 要求 mTLS 则连接会失败。
+
+```toml
+transport.protocol = "quic"
+```
+
 ## 安全说明
 
 - **常数时间比较**：所有 MAC、AEAD tag、TLS Finished、签名摘要的校验均使用
@@ -276,6 +292,10 @@ AES-CFB、ChaCha20-Poly1305、XChaCha20-Poly1305、X25519 与 ECDSA P-256
 - v1/v2 × `tcpMux` 开/关 × TCP/UDP/HTTP/HTTPS 端到端
 - 100 MB 传输，哈希校验（明文与加密）
 - KCP 经有损 UDP 中继（5%/10% 丢包），5 MB 传输
+- QUIC 256 KB 传输、4 并发、密钥更新、5% 丢包 UDP 中继、frps 重启后自动重连
+- QUIC 证书矩阵（正确/错误 CA、主机名不匹配、serverName 覆盖、ECDSA、mTLS）、
+  200 并发、10 MB、慢读取、IPv6、45 秒空闲
+- aioquic 有效密钥帧级模糊测试；i386/mipsel/armv6 32 位构建经 qemu 运行验证
 - 证书验证矩阵（正确/错误 CA、错误主机名）、mTLS
 - TLS 1.2 与 TLS 1.3、RSA 与 ECDSA 证书、多级证书链
 - AddressSanitizer + UndefinedBehaviorSanitizer 压力测试（干净）

@@ -15,7 +15,7 @@ implemented in-tree.
 | Multi-user | `user` attribute (proxies are namespaced on the server) |
 | Authentication | `token` — md5(token+timestamp), byte-compatible with frp |
 | Wire protocol | **v1 and v2** (`transport.wireProtocol`) |
-| Transports | plain TCP, **KCP over UDP**, **yamux** multiplexing (`transport.tcpMux`) |
+| Transports | plain TCP, **KCP over UDP**, **QUIC**, **yamux** multiplexing (`transport.tcpMux`) |
 | Encryption | per-proxy AES-128-CFB; v2 control channel AEAD (AES-256-GCM / XChaCha20-Poly1305); PBKDF2-HMAC-SHA1 and HKDF-SHA256 key derivation |
 | AES acceleration | runtime CPU dispatch: x86 AES-NI, otherwise a 256-byte S-box software AES |
 | Compression | per-proxy **snappy** (`useCompression`), byte-compatible with `golang/snappy` |
@@ -141,7 +141,7 @@ token = "secret123"                  # must match frps auth.token
 
 ```toml
 transport.wireProtocol = "v2"        # "v1" (default) or "v2"
-transport.protocol = "kcp"           # "tcp" (default) or "kcp"; needs kcpBindPort on frps
+transport.protocol = "kcp"           # "tcp" (default), "kcp" or "quic"; needs the matching port on frps
 transport.tcpMux = false             # must match frps (default true)
 transport.poolCount = 20             # raise frps' work-connection pool (poolCount + 10)
 ```
@@ -238,6 +238,26 @@ satisfied. Requires `kcpBindPort` on frps (0 disables it there), and
 `transport.tcpMux` must match the server (`tcpMux = false` on frps for
 non-muxed KCP).
 
+### QUIC
+
+QUIC v1 (RFC 9000/9001), implemented in-tree: packet protection
+(AES-128-GCM with AES header protection), QUIC-TLS over TLS 1.3 (X25519,
+`quic_transport_parameters`), flow control, loss recovery and key updates.
+One QUIC session carries all connections as independent bidirectional
+streams, so `transport.tcpMux` is ignored (like frp). Requires `quicBindPort`
+on frps. KCP and QUIC both use UDP, so their ports must differ
+(`kcpBindPort != quicBindPort`) or KCP must be disabled (`kcpBindPort = 0`).
+The client sends a PING after 10 s of inactivity and closes the session
+after 30 s without a valid packet, mirroring frps' QUIC defaults
+(`keepalivePeriod = 10`, `maxIdleTimeout = 30`).  `transport.tls.trustedCaFile`
+enables certificate-chain and hostname verification for the QUIC handshake,
+exactly like the TCP/KCP transports; client certificates (`certFile`/`keyFile`)
+are **not** supported over QUIC, so mTLS will fail if frps requires them.
+
+```toml
+transport.protocol = "quic"
+```
+
 ## Security notes
 
 - **Constant-time comparisons** are used for every MAC, AEAD tag, TLS
@@ -295,13 +315,22 @@ make test           # deterministic crypto vectors + parser fuzz (ASan/UBSan)
 `make test` runs the in-tree unit tests: NIST/RFC vectors for SHA-256,
 HMAC, HKDF, AES-GCM, AES-CFB, ChaCha20-Poly1305, XChaCha20-Poly1305,
 X25519 and ECDSA P-256, plus randomized fuzz loops over the JSON, base64,
-v2 UDP, X.509 DER and snappy parsers.
+v2 UDP, X.509 DER and snappy parsers.  A white-box suite (`test/quic_unit.c`)
+covers the QUIC internals: varint boundaries, packet-number reconstruction
+(RFC 9000 A.3), the key schedule (RFC 9001 A.1), header protection,
+frame builders, out-of-order stream reassembly and handshake ACK tracking.
 
 The client has also been verified against a real `frps` with:
 
 - v1/v2 × `tcpMux` on/off × TCP/UDP/HTTP/HTTPS end-to-end
 - 100 MB transfers, hash-verified (plain and encrypted)
 - KCP through a lossy UDP relay (5 %/10 % drop), 5 MB transfers
+- QUIC 256 KB transfers, 4 concurrent proxies, key updates,
+  a 5 % lossy UDP relay, and reconnect after an frps restart
+- QUIC certificate matrix (trusted CA, wrong CA, hostname mismatch,
+  serverName override, ECDSA, mTLS) and 200/10 MB/slow-reader/IPv6/45 s-idle runs
+- QUIC frame-level fuzzing against aioquic (valid keys) and 32-bit builds
+  (i386/mipsel/armv6) under qemu
 - certificate verification matrix (correct/wrong CA, wrong hostname), mTLS
 - TLS 1.2 and TLS 1.3, RSA and ECDSA certificates, multi-level chains
 - AddressSanitizer + UndefinedBehaviorSanitizer stress runs (clean)
